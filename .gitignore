@@ -1,0 +1,20 @@
+# Dependencies and generated executables
+node_modules/
+/bin/
+*.test
+*.log
+*.zip
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Local credentials and configuration
+.env
+.env.*
+*.pem
+*.key
+.ssh/
+id_rsa
+id_ed25519

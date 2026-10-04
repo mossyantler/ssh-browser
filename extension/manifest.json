@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "SSH Browser",
+  "version": "0.1.0",
+  "description": "선택한 SSH 서버의 SOCKS5 터널로 Chrome 트래픽을 연결합니다.",
+  "permissions": [
+    "storage",
+    "proxy",
+    "nativeMessaging"
+  ],
+  "incognito": "not_allowed",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SSH Browser"
+  },
+  "options_page": "options.html",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsNw54WXAGdTSbKD9MjwIViR5SoKmmTpM6VX+KlhCyBrD9lGp/ql6zHZ/ipaWVtjmTqfgdw4x4jkrGoYwuDPd7aZst4pNeF26vhEvV+tqh4ly1zLyH5SLSgej5b1YCtGj0Utj54TM4lzeZrneqhMGE5z9b1e29ak7Sp0zIrwyKxOj9UFA7C8GdmpXLmrlU+nYiLLD5TW5kmyMHV6jbYZdhb0p9yqv7XuIGjaPwdMpgXZRRHd1Sa5xXpzgr+vWyo0T4Hj+psDxpUQ12ig8XgRRMgTD5OltfpKdvsAq3BO+72MINZZwIHJPrTtmmp9u/jShX1mHfMfrTks1avG9cRbOLQIDAQAB"
+}

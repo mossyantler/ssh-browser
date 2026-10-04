@@ -1,0 +1,31 @@
+const {chromium}=require('playwright-core');
+const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),net=require('node:net'),http=require('node:http'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..');
+const id=fs.readFileSync(path.join(root,'extension/ID.txt'),'utf8').trim();
+const binary=path.join(root,'bin','ssh-browser-helper-darwin-'+(process.arch==='arm64'?'arm64':'amd64'));
+const browserPath=process.env.CHROME_TEST_BINARY;
+if(!browserPath)throw new Error('Set CHROME_TEST_BINARY to a Chrome for Testing binary.');
+const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'ssh-browser-chrome-'));
+let context,server,socks;let requests=0;const routed=[];
+const listen=s=>new Promise(r=>s.listen(0,'127.0.0.1',r));
+const close=s=>new Promise(r=>s?s.close(r):r());
+(async()=>{try{
+ const profile=path.join(tmp,'profile'),home=path.join(tmp,'home');fs.mkdirSync(profile,{recursive:true});fs.mkdirSync(home,{recursive:true});
+ const manifest={name:'com.sshbrowser.helper',description:'isolated test helper',path:binary,type:'stdio',allowed_origins:['chrome-extension://'+id+'/']};
+ for(const dir of [path.join(profile,'NativeMessagingHosts'),path.join(home,'Library/Application Support/Google/Chrome/NativeMessagingHosts')]){fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'com.sshbrowser.helper.json'),JSON.stringify(manifest));}
+ context=await chromium.launchPersistentContext(profile,{executablePath:browserPath,headless:true,env:{...process.env,HOME:home},args:['--disable-extensions-except='+path.join(root,'extension'),'--load-extension='+path.join(root,'extension'),'--no-first-run','--disable-background-networking']});
+ let worker=context.serviceWorkers()[0];if(!worker)worker=await context.waitForEvent('serviceworker',{timeout:15000});assert.ok(worker.url().startsWith('chrome-extension://'+id+'/'));
+ const page=await context.newPage();await page.goto('chrome-extension://'+id+'/options.html');
+ const call=msg=>page.evaluate(msg=>chrome.runtime.sendMessage(msg),msg);
+ let state=await call({type:'GET_STATE'});assert.equal(state.ok,true);assert.equal(state.state.status,'disabled');
+ const host={id:'integration-test',name:'테스트 Host',mode:'alias',alias:'integration-test',group:'테스트',favorite:true,port:22,user:'',address:'',keyPath:''};assert.equal((await call({type:'SAVE_HOST',host})).ok,true);
+ const native=await page.evaluate(()=>new Promise((resolve,reject)=>{const port=chrome.runtime.connectNative('com.sshbrowser.helper');const replies=[];const timeout=setTimeout(()=>{port.disconnect();reject(new Error('native timeout'));},5000);port.onDisconnect.addListener(()=>{const message=chrome.runtime.lastError?.message;if(message){clearTimeout(timeout);reject(new Error(message));}});port.onMessage.addListener(m=>{replies.push(m);if(m.requestId==='hello'){port.postMessage({type:'status',requestId:'status'});}if(m.requestId==='status'){clearTimeout(timeout);port.disconnect();resolve(replies);}});port.postMessage({type:'hello',requestId:'hello',protocol:1,profileId:'browser-integration'});}));assert.equal(native[0].ok,true);assert.equal(native[0].result.protocol,1);assert.deepEqual(native[1].result.tunnels,[]);
+ assert.equal((await call({type:'LOCAL'})).ok,true);assert.equal((await page.evaluate(()=>chrome.proxy.settings.get({incognito:false}))).value.mode,'direct');
+ server=http.createServer((req,res)=>{requests++;res.setHeader('Access-Control-Allow-Origin','*');res.end('SSH_BROWSER_PROXY_TEST');});await listen(server);const httpPort=server.address().port;
+ socks=net.createServer(socket=>{socket.once('data',greeting=>{if(greeting[0]!==5){socket.destroy();return;}socket.write(Buffer.from([5,0]));socket.once('data',request=>{let host,offset;if(request[3]===1){host=Array.from(request.subarray(4,8)).join('.');offset=8;}else if(request[3]===3){host=request.subarray(5,5+request[4]).toString();offset=5+request[4];}else{socket.destroy();return;}const port=request.readUInt16BE(offset);routed.push({host,port});const target=net.connect({host:'127.0.0.1',port},()=>{socket.write(Buffer.from([5,0,0,1,127,0,0,1,0,0]));socket.pipe(target);target.pipe(socket);});target.on('error',()=>socket.destroy());socket.on('error',()=>target.destroy());socket.on('close',()=>target.destroy());});});});await listen(socks);const socksPort=socks.address().port;
+ await page.evaluate(port=>chrome.proxy.settings.set({value:{mode:'fixed_servers',rules:{singleProxy:{scheme:'socks5',host:'127.0.0.1',port},bypassList:['<-loopback>']}},scope:'regular'}),socksPort);
+ const routePage=await context.newPage();await routePage.goto('http://127.0.0.1:'+httpPort+'/ip');await routePage.goto('http://localhost:'+httpPort+'/name');assert.ok(routed.some(r=>r.host==='127.0.0.1'&&r.port===httpPort));assert.ok(routed.some(r=>r.host==='localhost'&&r.port===httpPort));
+ await page.evaluate(()=>chrome.proxy.settings.set({value:{mode:'fixed_servers',rules:{singleProxy:{scheme:'socks5',host:'127.0.0.1',port:9},bypassList:['<-loopback>']}},scope:'regular'}));const before=requests;let blocked=false;try{await routePage.goto('http://127.0.0.1:'+httpPort+'/blocked',{timeout:5000});}catch{blocked=true;}assert.ok(blocked,'dead SOCKS must not fall back to local');assert.equal(requests,before);
+ assert.equal((await call({type:'STOP'})).ok,true);assert.notEqual((await page.evaluate(()=>chrome.proxy.settings.get({incognito:false}))).levelOfControl,'controlled_by_this_extension');
+ console.log(JSON.stringify({extensionLoaded:true,nativeMessaging:true,hostCRUD:true,localDirect:true,localhostThroughSOCKS:true,ipv4ThroughSOCKS:true,deadProxyBlocked:true,stopRestoresUnderlying:true,chrome:await context.browser().version()},null,2));
+}finally{if(context)await context.close();await close(socks);await close(server);fs.rmSync(tmp,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});
