@@ -73,7 +73,7 @@ func TestValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := []string{"-N", "-T", "-S", "none", "-D", "127.0.0.1:12345", "-o", "ControlMaster=no", "-o", "ControlPersist=no", "-o", "ForkAfterAuthentication=no", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "-p", "2222", "-l", "alice", "-i", "/Users/alice/.ssh/key with spaces", "--", "2001:db8::1"}
+	expected := []string{"-N", "-T", "-S", "none", "-D", "127.0.0.1:12345", "-o", "ControlMaster=no", "-o", "ControlPersist=no", "-o", "ForkAfterAuthentication=no", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UpdateHostKeys=no", "-o", "CheckHostIP=no", "-o", "PermitLocalCommand=no", "-o", "AddKeysToAgent=no", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-p", "2222", "-l", "alice", "-i", "/Users/alice/.ssh/key with spaces", "--", "2001:db8::1"}
 	if !reflect.DeepEqual(args, expected) {
 		t.Fatalf("unexpected args: %v", args)
 	}
@@ -157,6 +157,9 @@ func TestManagerSwitchAndRelease(t *testing.T) {
 	a, err := m.connect(context.Background(), h)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if data, _ := json.Marshal(a); a.ConnectMs < 0 || !strings.Contains(string(data), `"connectMs":`) {
+		t.Fatalf("connect timing missing from tunnel info: %s", data)
 	}
 	b, err := m.connect(context.Background(), h)
 	if err != nil {
@@ -251,7 +254,7 @@ func TestBoundedDiagnostics(t *testing.T) {
 	if len(b.text()) != 8192 {
 		t.Fatal("unbounded stderr")
 	}
-	for _, tc := range []struct{ message, code string }{{"Permission denied (publickey). secret", "AUTH"}, {"Host key verification failed. secret", "HOST_KEY"}, {"Connection timed out secret", "TIMEOUT"}} {
+	for _, tc := range []struct{ message, code string }{{"Permission denied (publickey). secret", "AUTH"}, {"Host key verification failed. secret", "HOST_KEY"}, {"Connection timed out secret", "TIMEOUT"}, {"connect to host secret port 22: Connection refused", "NETWORK"}, {"ssh: Could not resolve hostname secret: nodename nor servname provided", "NETWORK"}, {"unclassified secret", "SSH_CONNECT"}} {
 		b := &boundedLog{}
 		_, _ = io.WriteString(b, tc.message)
 		err := classify(b, "SSH_CONNECT")

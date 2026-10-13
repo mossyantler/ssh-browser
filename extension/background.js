@@ -1,8 +1,8 @@
-import {createController} from './core.js';
+import {createController,retryLabel} from './core.js';
 async function updateBadge(state) {
   const host=state.hosts.find(h=>h.id===state.activeHostId || h.id===state.selectedHostId);
-  const text={connected:'SSH',connecting:'…',local:'LOC',error:'!',disabled:''}[state.status] || '';
-  const title=state.status==='connected' ? `SSH Browser · ${host?.name || 'SSH'}로 접속 중` : state.status==='error' ? `SSH Browser · 연결 오류: ${state.error || '연결 확인 필요'}` : state.status==='local' ? 'SSH Browser · 로컬 직접 연결' : state.status==='connecting' ? 'SSH Browser · SSH 연결 중' : 'SSH Browser · 기존 프록시 설정 사용';
+  const text={connected:'SSH',connecting:'…',reconnecting:'…',local:'LOC',error:'!',disabled:''}[state.status] || '';
+  const title=state.status==='connected' ? `SSH Browser · ${host?.name || 'SSH'}로 접속 중` : state.status==='reconnecting' ? `SSH Browser · 자동 재연결 ${retryLabel(state)}` : state.status==='error' ? `SSH Browser · 연결 오류: ${state.error || '연결 확인 필요'}` : state.status==='local' ? 'SSH Browser · 로컬 직접 연결' : state.status==='connecting' ? 'SSH Browser · SSH 연결 중' : 'SSH Browser · 기존 프록시 설정 사용';
   try {
     await chrome.action.setBadgeText({text});
     await chrome.action.setBadgeBackgroundColor({color:state.status==='error'?'#c54c5b':state.status==='connected'?'#347e74':'#33465c'});

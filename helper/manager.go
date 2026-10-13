@@ -50,6 +50,8 @@ func classify(log *boundedLog, fallback string) *apiError {
 		return failure("AUTH", "SSH key or agent authentication failed. Interactive authentication is not supported.")
 	case strings.Contains(s, "timed out"), strings.Contains(s, "timeout"):
 		return failure("TIMEOUT", "SSH connection timed out.")
+	case strings.Contains(s, "connection refused"), strings.Contains(s, "no route to host"), strings.Contains(s, "could not resolve hostname"), strings.Contains(s, "network is unreachable"), strings.Contains(s, "connection reset"), strings.Contains(s, "connection closed by"):
+		return failure("NETWORK", "SSH server is unreachable.")
 	default:
 		return failure(fallback, "SSH tunnel could not be established.")
 	}
@@ -92,6 +94,8 @@ type tunnelInfo struct {
 	HostID   string `json:"hostId"`
 	Port     int    `json:"port"`
 	Status   string `json:"status"`
+	// ConnectMs covers process start through SOCKS readiness, including port-collision retries.
+	ConnectMs int64 `json:"connectMs"`
 }
 type tunnel struct {
 	info        tunnelInfo
@@ -165,6 +169,7 @@ func (m *tunnelManager) connect(ctx context.Context, h hostSpec) (tunnelInfo, *a
 	if err := validateHost(h); err != nil {
 		return tunnelInfo{}, err
 	}
+	started := time.Now()
 	deadlineCtx, cancel := context.WithTimeout(ctx, m.readinessTimeout)
 	defer cancel()
 	for attempt := 0; attempt < 3; attempt++ {
@@ -177,7 +182,7 @@ func (m *tunnelManager) connect(ctx context.Context, h hostSpec) (tunnelInfo, *a
 		if err != nil {
 			return tunnelInfo{}, failure("INTERNAL", "Cannot create tunnel identifier.")
 		}
-		t := &tunnel{info: tunnelInfo{id, h.ID, port, "connecting"}, log: &boundedLog{}, done: make(chan struct{})}
+		t := &tunnel{info: tunnelInfo{TunnelID: id, HostID: h.ID, Port: port, Status: "connecting"}, log: &boundedLog{}, done: make(chan struct{})}
 		m.mu.Lock()
 		if m.closing || deadlineCtx.Err() != nil {
 			m.mu.Unlock()
@@ -201,6 +206,7 @@ func (m *tunnelManager) connect(ctx context.Context, h hostSpec) (tunnelInfo, *a
 			m.mu.Lock()
 			if current, exists := m.tunnels[id]; exists && current == t && !m.closing && deadlineCtx.Err() == nil {
 				t.info.Status = "ready"
+				t.info.ConnectMs = time.Since(started).Milliseconds()
 				info := t.info
 				m.mu.Unlock()
 				return info, nil

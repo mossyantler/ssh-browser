@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "npm run vendor:primer",
+  "packages": [
+    {
+      "name": "@primer/css",
+      "version": "22.3.2",
+      "license": "MIT",
+      "resolved": "https://registry.npmjs.org/@primer/css/-/css-22.3.2.tgz",
+      "integrity": "sha512-Vjx7U/ILnGsEQP+cZ4p8blVTFcjE2TmwxTICvv5RjoBdS7QacDVllpJo+A9raJB0TxvetPiOqSR7NyHX3hcMKQ=="
+    },
+    {
+      "name": "@primer/primitives",
+      "version": "11.10.0",
+      "license": "MIT",
+      "resolved": "https://registry.npmjs.org/@primer/primitives/-/primitives-11.10.0.tgz",
+      "integrity": "sha512-ihZxIst4Izry284StKFjpbYvX6R/IBFTLu+qiuAmR93PsKF2hdjoabhSYwKI8iCxOUx94jVP55bI3NoY7STjYQ=="
+    }
+  ],
+  "themeAttributes": {
+    "mode": "data-color-mode",
+    "modes": [
+      "light",
+      "dark",
+      "auto"
+    ],
+    "lightTheme": "data-light-theme",
+    "darkTheme": "data-dark-theme",
+    "themes": [
+      "light",
+      "light_colorblind",
+      "light_high_contrast",
+      "light_tritanopia",
+      "dark",
+      "dark_dimmed",
+      "dark_high_contrast",
+      "dark_colorblind",
+      "dark_tritanopia"
+    ]
+  },
+  "files": [
+    {
+      "path": "primer.css",
+      "sourcePackage": "@primer/css",
+      "sourcePath": "dist/primer.css",
+      "bytes": 1061467,
+      "sha256": "2dbafa2de726c584e0b2f7128c061fceda730f3776ecd8b0c5fac93b986e884e"
+    },
+    {
+      "path": "primer.css.map",
+      "sourcePackage": "@primer/css",
+      "sourcePath": "dist/primer.css.map",
+      "bytes": 262176,
+      "sha256": "35256347bc9ff4260d7b89e49d1e1fbf9d914de42a39226ae135a9b311e9f4f3"
+    },
+    {
+      "path": "LICENSE",
+      "sourcePackage": "@primer/css",
+      "sourcePath": "LICENSE",
+      "bytes": 1078,
+      "sha256": "e2719fc6fd67f6d25fea6cc263509bc517460a554248a8b87426e06e51ea4984"
+    },
+    {
+      "path": "PRIMITIVES_LICENSE",
+      "sourcePackage": "@primer/primitives",
+      "sourcePath": "LICENSE",
+      "bytes": 1078,
+      "sha256": "e63582a78dddebe610b6cb59f0e7f5f761c1bb6a1c9551443beddc64fe525c3a"
+    }
+  ]
+}

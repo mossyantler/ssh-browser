@@ -1,33 +1,160 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SSH Browser · 호스트</title><link rel="stylesheet" href="ui.css"><script type="module" src="ui.js"></script></head>
+<html lang="ko" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SSH Browser · 호스트 관리</title>
+  <link rel="stylesheet" href="vendor/primer/primer.css">
+  <link rel="stylesheet" href="ui.css">
+  <script type="module" src="ui.js"></script>
+</head>
 <body data-view="options">
-<div class="preview-banner" id="preview-banner" hidden>UI 미리보기 · 실제 SSH 연결 없음</div>
-<div id="incognito-warning" class="incognito-warning" hidden>시크릿 모드에서는 SSH Browser를 사용할 수 없습니다.</div>
-<div class="workspace" id="app">
-<aside class="sidebar">
-<a class="brand" href="options.html" aria-label="SSH Browser 홈"><span class="brand-symbol" aria-hidden="true">↗</span><span>SSH <strong>Browser</strong><small>YOUR PRIVATE ROUTE</small></span></a>
-<div class="sidebar-section-label">WORKSPACE</div>
-<nav class="nav-list" aria-label="호스트 보기"><button class="nav-item active" data-filter="all"><span class="nav-glyph">▦</span><span>모든 호스트</span><span id="all-count" class="count">0</span></button><button class="nav-item" data-filter="favorites"><span class="nav-glyph">☆</span><span>즐겨찾기</span><span id="favorite-count" class="count">0</span></button></nav>
-<div class="sidebar-section-label groups-heading">GROUPS <span id="group-count">0</span></div><nav id="group-list" class="nav-list" aria-label="그룹"></nav><p id="no-groups" class="sidebar-hint">호스트에 그룹을 지정하면<br>이곳에 함께 정리됩니다.</p>
-<div class="sidebar-bottom"><div class="mini-icon" aria-hidden="true">⌘</div><div><strong>내 브라우저에만 저장</strong><p>호스트 설정은 기기 밖으로<br>동기화되지 않습니다.</p></div></div>
-<div class="version-line"><span>macOS · Chrome</span><span>v0.1</span></div>
-</aside>
-<main class="main-panel"><header class="topbar"><div class="breadcrumb">워크스페이스 <span>/</span> 호스트</div><div class="topbar-note"><span class="tiny-dot"></span> 개인 워크스페이스</div></header>
-<div class="main-content"><section class="page-heading"><div><div class="eyebrow">CONNECTION LIBRARY</div><h1 id="page-title">모든 호스트<span class="title-dot">.</span></h1><p>익숙한 서버로, 나만의 경로를 만드세요.</p></div><button class="button primary" id="add-host"><span aria-hidden="true">＋</span> 호스트 추가</button></section>
-<section class="route-banner" aria-label="현재 브라우저 경로"><span class="route-icon" aria-hidden="true">↗</span><div class="route-copy"><div class="route-heading"><strong id="status-title">상태 확인 중</strong><span class="status-pill" id="status-pill">확인 중</span></div><p id="status-description">브라우저의 현재 연결 상태를 확인합니다.</p></div><button class="button secondary small" id="local-button">로컬 직접 연결</button></section>
-<div class="error-panel" id="error-panel" role="alert" hidden><span id="error-text"></span><button class="text-button" id="retry-state">다시 확인</button></div>
-<div class="library-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="이름, 주소 또는 그룹 검색" aria-label="호스트 검색" autocomplete="off"><kbd>/</kbd></label><span class="result-count" id="result-count">0개의 호스트</span></div>
-<div id="host-grid" class="host-grid"></div>
-<section class="empty-state" id="empty-state" hidden><span class="empty-symbol" aria-hidden="true">⌘</span><h2 id="empty-title">첫 번째 경로를 추가하세요</h2><p id="empty-description">SSH config의 별칭이나 서버 주소로<br>나만의 호스트 목록을 만들어 보세요.</p><button class="button secondary" id="empty-add">＋ 첫 호스트 추가</button><div class="empty-footnote">비밀번호와 개인 키 내용은 저장하지 않습니다.</div></section>
-<footer class="library-footer"><span><span class="tiny-dot"></span> SSH 기반 SOCKS5 연결</span><span>하나의 브라우저, 선택한 하나의 경로</span></footer>
-</div></main>
-<aside class="details-panel" aria-label="호스트 상세"><div class="details-heading">HOST DETAILS <span aria-hidden="true">↗</span></div><div id="host-details"></div><div class="safety-note"><span aria-hidden="true">◇</span><p><strong>키는 그대로, 경로만 새롭게.</strong><br>인증은 macOS의 SSH가 처리합니다.<br>이 확장에는 비밀번호나 개인 키<br>내용을 입력하지 마세요.</p></div><button class="text-button release-button" id="stop-button">확장 기능의 프록시 제어 해제</button></aside>
-</div>
-<dialog id="host-dialog" aria-labelledby="dialog-title"><form id="host-form"><header class="dialog-header"><div><div class="eyebrow">HOST CONFIGURATION</div><h2 id="dialog-title">새 호스트 추가</h2></div><button type="button" class="icon-button" id="close-dialog" aria-label="닫기">×</button></header><p class="dialog-intro">접속 정보만 저장합니다. 인증 정보는 SSH에서 관리하세요.</p>
-<div class="form-row"><label>이름 <span class="required">*</span><input name="name" id="host-name" required maxlength="100" placeholder="예: 개발 워크스테이션" autocomplete="off"></label><label>그룹 <span class="optional">선택</span><input name="group" id="host-group" maxlength="100" placeholder="예: Development" list="group-suggestions" autocomplete="off"><datalist id="group-suggestions"></datalist></label></div>
-<fieldset class="mode-fieldset"><legend>연결 방식</legend><div class="segmented"><label><input type="radio" name="mode" value="alias" checked><span>SSH config 별칭</span></label><label><input type="radio" name="mode" value="manual"><span>직접 입력</span></label></div></fieldset>
-<div id="alias-fields"><label>SSH 별칭 <span class="required">*</span><input name="alias" id="host-alias" placeholder="예: my-server" autocomplete="off"></label><p class="field-hint">~/.ssh/config에 등록된 Host 이름을 사용합니다.</p></div>
-<div id="manual-fields" hidden><label>서버 주소 <span class="required">*</span><input name="address" id="host-address" placeholder="예: server.example.com" autocomplete="off"></label><div class="form-row"><label>포트<input name="port" id="host-port" type="number" min="1" max="65535" value="22"></label><label>사용자 <span class="optional">선택</span><input name="user" id="host-user" placeholder="SSH 기본 사용자" autocomplete="off"></label></div><label>개인 키 경로 <span class="optional">선택 · 절대 경로</span><input name="keyPath" id="host-keyPath" placeholder="/Users/username/.ssh/id_ed25519" autocomplete="off"></label><p class="field-hint">경로만 저장합니다. 비워 두면 SSH의 기본 인증 설정을 사용합니다.</p></div>
-<label class="checkbox-label"><input type="checkbox" id="host-favorite" name="favorite"> 즐겨찾기에 추가</label><p class="form-error" id="form-error" role="alert" hidden></p><footer class="dialog-footer"><button type="button" class="button secondary" id="cancel-dialog">취소</button><button type="submit" class="button primary" id="save-host">호스트 저장</button></footer></form></dialog>
-<div class="toast" id="toast" role="status" hidden></div>
-</body></html>
+  <div class="border rounded-2 p-3 color-bg-attention color-border-attention preview-banner" id="preview-banner" role="status" hidden>UI 미리보기 · 실제 SSH 연결과 브라우저 경로 변경은 지원하지 않습니다.</div>
+  <div class="border rounded-2 p-3 color-bg-danger color-border-danger incognito-warning" id="incognito-warning" role="alert" hidden>시크릿 모드에서는 SSH Browser를 사용할 수 없습니다.</div>
+  <div class="workspace" id="app">
+    <header class="app-header">
+      <a class="brand" href="options.html" aria-label="SSH Browser 홈">SSH Browser</a>
+      <span class="color-fg-muted">호스트 관리</span>
+    </header>
+    <main class="main-content">
+      <section class="page-heading" aria-labelledby="page-title">
+        <div>
+          <h1 id="page-title" class="h2">모든 호스트</h1>
+          <p class="color-fg-muted">SSH 호스트를 저장하고 이 브라우저에서 사용할 경로를 선택하세요.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="add-host">호스트 추가</button>
+      </section>
+      <section class="route-banner" aria-label="현재 브라우저 경로">
+        <div class="route-copy">
+          <div class="route-heading">
+            <span class="color-fg-muted">현재 경로</span>
+            <strong id="status-title">상태 확인 중</strong>
+            <span class="IssueLabel color-bg-subtle status-pill" id="status-pill">확인 중</span>
+          </div>
+          <p class="color-fg-muted" id="status-description" aria-live="polite">브라우저의 현재 연결 상태를 확인합니다.</p>
+        </div>
+        <div class="route-actions">
+          <button type="button" class="btn btn-sm" id="local-button">로컬 직접 연결</button>
+          <button type="button" class="btn btn-sm btn-danger" id="stop-button">프록시 제어 해제</button>
+        </div>
+      </section>
+      <div class="border rounded-2 p-3 color-bg-danger color-border-danger error-panel" id="error-panel" role="alert" hidden>
+        <span id="error-text"></span>
+        <button type="button" class="btn btn-sm" id="retry-state">다시 확인</button>
+      </div>
+      <section class="border rounded-2 p-3 color-bg-subtle setup-panel" id="setup-panel" aria-labelledby="setup-title">
+        <div class="setup-heading">
+          <div>
+            <h2 class="h4" id="setup-title">설치 확인</h2>
+            <p id="setup-status" role="status">SSH Browser Helper.app을 처음 실행해 등록한 뒤 도우미 설치를 확인하세요.</p>
+          </div>
+          <button type="button" class="btn btn-sm" id="check-helper">도우미 설치 확인</button>
+        </div>
+        <p class="color-fg-danger" id="setup-error" role="alert" hidden></p>
+        <details id="setup-instructions" class="setup-instructions">
+          <summary>설치 순서 보기</summary>
+          <ol>
+            <li><strong>macOS 도우미 등록</strong><p>독립형 <code>SSH Browser Helper.app</code>을 다운로드해 <code>/Applications</code> 또는 <code>~/Applications</code>에 놓고, 일반 앱처럼 한 번 실행하세요. 첫 실행 시 Chrome Native Messaging에 자동 등록됩니다. Helper 창은 닫아도 돼요. 확장이 필요할 때 Chrome이 native host를 실행합니다.</p></li>
+            <li><strong>Chrome에 확장 프로그램 추가</strong><p>별도로 받은 <code>SSH-Browser-Extension.zip</code>을 원하는 영구 보관 폴더에 압축 해제하세요. <code>chrome://extensions</code>에서 개발자 모드를 켜고, ‘압축해제된 확장 프로그램을 로드합니다’를 선택한 다음 <code>manifest.json</code>이 들어 있는 <code>extension</code> 폴더를 선택해 주세요. Helper.app에는 확장이 포함되지 않으며, 확장 파일을 복사·삭제·이동하지 않습니다.</p></li>
+            <li><strong>설치 상태 확인</strong><p>이 화면으로 돌아와 ‘도우미 설치 확인’을 누르세요. 확인이 끝나면 호스트를 선택해 연결할 수 있어요.</p></li>
+          </ol>
+          <p class="color-fg-muted">미리보기에서는 실제 도우미 확인이나 SSH 연결을 실행하지 않습니다.</p>
+        </details>
+      </section>
+      <div class="host-workspace">
+        <section class="host-library" aria-label="호스트 목록">
+          <div class="library-toolbar">
+            <input class="form-control search-field" id="search" type="search" placeholder="이름, 주소 또는 그룹 검색" aria-label="호스트 검색" autocomplete="off">
+            <span class="color-fg-muted result-count" id="result-count" aria-live="polite">0개의 호스트</span>
+          </div>
+          <div class="filter-toolbar">
+            <nav class="filter-list" aria-label="호스트 보기">
+              <button type="button" class="btn btn-sm nav-item active selected" data-filter="all" aria-pressed="true">모든 호스트 <span id="all-count" class="Counter">0</span></button>
+              <button type="button" class="btn btn-sm nav-item" data-filter="favorites" aria-pressed="false">즐겨찾기 <span id="favorite-count" class="Counter">0</span></button>
+            </nav>
+            <details class="group-filter">
+              <summary class="btn btn-sm">그룹 <span id="group-count" class="Counter">0</span></summary>
+              <div class="group-menu">
+                <nav id="group-list" class="filter-list" aria-label="그룹 필터"></nav>
+                <p id="no-groups" class="color-fg-muted">호스트에 그룹을 지정하면 여기에 표시됩니다.</p>
+              </div>
+            </details>
+          </div>
+          <div id="host-grid" class="host-grid host-list" aria-label="저장된 호스트"></div>
+          <section class="empty-state" id="empty-state" hidden>
+            <h2 class="h3" id="empty-title">저장된 호스트가 없습니다</h2>
+            <p class="color-fg-muted" id="empty-description">SSH config 별칭이나 서버 주소로 첫 호스트를 추가하세요.</p>
+            <button type="button" class="btn" id="empty-add">호스트 추가</button>
+          </section>
+          <footer class="library-footer color-fg-muted">호스트 설정은 이 기기에 저장됩니다.</footer>
+        </section>
+        <aside class="details-panel" aria-labelledby="details-title">
+          <h2 class="h4 details-heading" id="details-title">선택한 호스트</h2>
+          <div id="host-details"></div>
+          <p class="safety-note color-fg-muted">인증은 macOS의 SSH가 처리합니다. 비밀번호와 개인 키 내용은 저장하지 않아요.</p>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <dialog id="host-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-intro">
+    <form id="host-form">
+      <header class="dialog-header">
+        <h2 class="h3" id="dialog-title">새 호스트 추가</h2>
+        <button type="button" class="btn btn-sm" id="close-dialog" aria-label="호스트 편집 창 닫기">닫기</button>
+      </header>
+      <p class="dialog-intro color-fg-muted" id="dialog-intro">접속 정보만 저장합니다. 비밀번호나 개인 키 내용은 입력하지 마세요.</p>
+      <p class="border rounded-2 p-3 color-bg-attention color-border-attention connection-lock-note" id="connection-lock-note" role="status" hidden>연결 중이거나 현재 사용 중인 호스트의 연결 방식·주소·SSH 별칭·포트·사용자·개인 키 경로는 변경할 수 없어요. 이름·그룹·즐겨찾기는 수정할 수 있어요. 접속 정보를 바꾸려면 먼저 연결을 해제하세요.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <div class="form-group-header"><label for="host-name">이름 <span class="color-fg-danger" aria-hidden="true">*</span></label></div>
+          <div class="form-group-body"><input class="form-control" name="name" id="host-name" required maxlength="100" placeholder="예: 개발 서버" autocomplete="off"></div>
+        </div>
+        <div class="form-group">
+          <div class="form-group-header"><label for="host-group">그룹 <span class="color-fg-muted">(선택)</span></label></div>
+          <div class="form-group-body"><input class="form-control" name="group" id="host-group" maxlength="100" placeholder="예: 개발" list="group-suggestions" autocomplete="off"><datalist id="group-suggestions"></datalist></div>
+        </div>
+      </div>
+      <fieldset class="mode-fieldset">
+        <legend class="text-bold">연결 방식</legend>
+        <div class="mode-options">
+          <label><input type="radio" name="mode" value="alias" checked> SSH config 별칭</label>
+          <label><input type="radio" name="mode" value="manual"> 직접 입력</label>
+        </div>
+      </fieldset>
+      <div id="alias-fields">
+        <div class="form-group">
+          <div class="form-group-header"><label for="host-alias">SSH 별칭 <span class="color-fg-danger" aria-hidden="true">*</span></label></div>
+          <div class="form-group-body"><input class="form-control" name="alias" id="host-alias" placeholder="예: my-server" autocomplete="off" aria-describedby="alias-hint"><p class="note" id="alias-hint"><code>~/.ssh/config</code>에 등록된 Host 이름을 사용합니다.</p></div>
+        </div>
+      </div>
+      <div id="manual-fields" hidden>
+        <div class="form-group">
+          <div class="form-group-header"><label for="host-address">서버 주소 <span class="color-fg-danger" aria-hidden="true">*</span></label></div>
+          <div class="form-group-body"><input class="form-control" name="address" id="host-address" placeholder="예: server.example.com" autocomplete="off"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <div class="form-group-header"><label for="host-port">포트</label></div>
+            <div class="form-group-body"><input class="form-control" name="port" id="host-port" type="number" min="1" max="65535" value="22"></div>
+          </div>
+          <div class="form-group">
+            <div class="form-group-header"><label for="host-user">사용자 <span class="color-fg-muted">(선택)</span></label></div>
+            <div class="form-group-body"><input class="form-control" name="user" id="host-user" placeholder="SSH 기본 사용자" autocomplete="off"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="form-group-header"><label for="host-keyPath">개인 키 경로 <span class="color-fg-muted">(선택 · 절대 경로)</span></label></div>
+          <div class="form-group-body"><input class="form-control" name="keyPath" id="host-keyPath" placeholder="/Users/username/.ssh/id_ed25519" autocomplete="off" aria-describedby="key-hint"><p class="note" id="key-hint">경로만 저장합니다. 비워 두면 SSH의 기본 인증 설정을 사용합니다.</p></div>
+        </div>
+      </div>
+      <div class="form-checkbox"><label><input type="checkbox" id="host-favorite" name="favorite"> 즐겨찾기에 추가</label></div>
+      <p class="border rounded-2 p-3 color-bg-danger color-border-danger form-error" id="form-error" role="alert" hidden></p>
+      <footer class="dialog-footer">
+        <button type="button" class="btn" id="cancel-dialog">취소</button>
+        <button type="submit" class="btn btn-primary" id="save-host">호스트 저장</button>
+      </footer>
+    </form>
+  </dialog>
+  <div class="border rounded-2 p-3 color-bg-default toast" id="toast" role="status" hidden></div>
+</body>
+</html>

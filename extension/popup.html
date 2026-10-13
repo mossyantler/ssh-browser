@@ -1,1 +1,66 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SSH Browser</title><link rel="stylesheet" href="ui.css"><script type="module" src="ui.js"></script></head><body data-view="popup"><div class="preview-banner" id="preview-banner" hidden>UI 미리보기 · 실제 SSH 연결 없음</div><div id="incognito-warning" class="incognito-warning" hidden>시크릿 모드에서는 사용할 수 없습니다.</div><main class="popup" id="app"><header class="popup-header"><a class="brand" href="options.html" id="popup-brand"><span class="brand-symbol" aria-hidden="true">↗</span><span>SSH <strong>Browser</strong></span></a><button class="icon-button" id="open-settings" title="호스트 관리" aria-label="호스트 관리 열기">⚙</button></header><section class="popup-route"><div class="eyebrow">CURRENT ROUTE</div><div class="route-heading"><strong id="status-title">상태 확인 중</strong><span class="status-pill" id="status-pill">확인 중</span></div><p id="status-description">브라우저 연결 상태를 확인합니다.</p></section><div class="error-panel" id="error-panel" role="alert" hidden><span id="error-text"></span><button class="text-button" id="retry-state">다시 확인</button></div><button class="local-option" id="local-button"><span class="local-option-icon">◎</span><span><strong>로컬 직접 연결</strong><small>SSH 프록시 없이 DIRECT 사용</small></span><span aria-hidden="true">↗</span></button><div class="popup-list-heading"><span>호스트로 전환</span><span id="result-count">0</span></div><label class="search-field popup-search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="호스트 검색" aria-label="호스트 검색"></label><div id="popup-host-list"></div><div class="popup-empty" id="empty-state" hidden>아직 저장된 호스트가 없습니다.<br><button class="text-button" id="empty-add">호스트 추가하기 ↗</button></div><footer class="popup-footer"><button class="text-button" id="stop-button">프록시 제어 해제</button><span id="helper-version">SSH Browser v0.1</span></footer></main><div class="toast" id="toast" role="status" hidden></div></body></html>
+<!doctype html>
+<html lang="ko" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SSH Browser</title>
+  <link rel="stylesheet" href="vendor/primer/primer.css">
+  <link rel="stylesheet" href="ui.css">
+  <script type="module" src="ui.js"></script>
+</head>
+<body data-view="popup">
+  <div class="border rounded-2 p-3 color-bg-attention color-border-attention preview-banner" id="preview-banner" role="status" hidden>UI 미리보기 · 실제 SSH 연결 없음</div>
+  <div class="border rounded-2 p-3 color-bg-danger color-border-danger incognito-warning" id="incognito-warning" role="alert" hidden>시크릿 모드에서는 사용할 수 없습니다.</div>
+  <main class="popup" id="app">
+    <header class="popup-header">
+      <a class="brand" href="options.html" id="popup-brand">SSH Browser</a>
+      <button type="button" class="btn btn-sm" id="open-settings" aria-label="호스트 관리 열기">호스트 관리</button>
+    </header>
+    <section class="popup-route" aria-label="현재 브라우저 경로">
+      <p class="color-fg-muted route-label">현재 경로</p>
+      <div class="route-heading">
+        <strong id="status-title">상태 확인 중</strong>
+        <span class="IssueLabel color-bg-subtle status-pill" id="status-pill">확인 중</span>
+      </div>
+      <p class="color-fg-muted" id="status-description" aria-live="polite">브라우저 연결 상태를 확인합니다.</p>
+      <div class="route-actions">
+        <button type="button" class="btn btn-sm" id="local-button">로컬 직접 연결</button>
+        <button type="button" class="btn btn-sm btn-danger" id="stop-button">프록시 제어 해제</button>
+      </div>
+    </section>
+    <div class="border rounded-2 p-3 color-bg-danger color-border-danger error-panel" id="error-panel" role="alert" hidden>
+      <span id="error-text"></span>
+      <button type="button" class="btn btn-sm" id="retry-state">다시 확인</button>
+    </div>
+    <section class="border rounded-2 p-3 color-bg-subtle setup-panel" id="setup-panel" aria-labelledby="setup-title">
+      <h2 class="h5" id="setup-title">설치 확인</h2>
+      <p id="setup-status" role="status">SSH Browser Helper.app을 처음 실행해 등록한 뒤 도우미 설치를 확인하세요.</p>
+      <button type="button" class="btn btn-sm" id="check-helper">도우미 설치 확인</button>
+      <p class="color-fg-danger" id="setup-error" role="alert" hidden></p>
+      <details id="setup-instructions" class="setup-instructions">
+        <summary>설치 순서 보기</summary>
+        <ol>
+          <li>독립형 <code>SSH Browser Helper.app</code>을 다운로드해 <code>/Applications</code> 또는 <code>~/Applications</code>에 놓고, 일반 앱처럼 한 번 실행하세요. 첫 실행 시 Chrome Native Messaging에 자동 등록됩니다. Helper 창은 닫아도 돼요. 확장이 필요할 때 Chrome이 native host를 실행합니다.</li>
+          <li>별도로 받은 <code>SSH-Browser-Extension.zip</code>을 원하는 영구 보관 폴더에 압축 해제하세요. <code>chrome://extensions</code>에서 개발자 모드를 켜고, ‘압축해제된 확장 프로그램을 로드합니다’로 <code>manifest.json</code>이 들어 있는 <code>extension</code> 폴더를 선택해 주세요. Helper.app에는 확장이 포함되지 않으며, 확장 파일을 복사·삭제·이동하지 않습니다.</li>
+          <li>이 화면에서 ‘도우미 설치 확인’을 누르세요.</li>
+        </ol>
+        <p class="color-fg-muted">미리보기에서는 실제 설치 확인이나 SSH 연결을 실행하지 않습니다.</p>
+      </details>
+    </section>
+    <section class="popup-library" aria-label="호스트로 연결">
+      <div class="popup-list-heading">
+        <h2 class="h5">호스트</h2>
+        <span class="Counter" id="result-count" aria-live="polite">0</span>
+      </div>
+      <input class="form-control popup-search" id="search" type="search" placeholder="호스트 검색" aria-label="호스트 검색" autocomplete="off">
+      <div id="popup-host-list" class="popup-host-list"></div>
+      <div class="popup-empty color-fg-muted" id="empty-state" hidden>
+        <p>아직 저장된 호스트가 없습니다.</p>
+        <button type="button" class="btn btn-sm" id="empty-add">호스트 추가</button>
+      </div>
+    </section>
+    <footer class="popup-footer color-fg-muted"><span id="helper-version">SSH Browser v0.1.0</span><span>이 기기에 저장</span></footer>
+  </main>
+  <div class="border rounded-2 p-3 color-bg-default toast" id="toast" role="status" hidden></div>
+</body>
+</html>

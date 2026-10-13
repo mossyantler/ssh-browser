@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.mjs"
+    "test": "node --test tests/*.mjs",
+    "vendor:primer": "node scripts/vendor-primer.mjs",
+    "vendor:primer:check": "node scripts/vendor-primer.mjs --check"
+  },
+  "devDependencies": {
+    "@primer/css": "22.3.2"
   }
 }

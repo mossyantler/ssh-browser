@@ -74,7 +74,7 @@ func sshArgs(h hostSpec, port int) ([]string, *apiError) {
 	if err := validateHost(h); err != nil {
 		return nil, err
 	}
-	args := []string{"-N", "-T", "-S", "none", "-D", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), "-o", "ControlMaster=no", "-o", "ControlPersist=no", "-o", "ForkAfterAuthentication=no", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"}
+	args := []string{"-N", "-T", "-S", "none", "-D", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), "-o", "ControlMaster=no", "-o", "ControlPersist=no", "-o", "ForkAfterAuthentication=no", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UpdateHostKeys=no", "-o", "CheckHostIP=no", "-o", "PermitLocalCommand=no", "-o", "AddKeysToAgent=no", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}
 	dest := h.Alias
 	if h.Mode == "manual" {
 		dest = h.Address

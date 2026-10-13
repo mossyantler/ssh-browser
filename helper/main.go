@@ -69,6 +69,11 @@ func serve(ctx context.Context, input io.Reader, output io.Writer, runner comman
 				} else {
 					hello = true
 					reply.Result = map[string]any{"version": version, "protocol": 1}
+					go networkWatch(ctx, func(e networkEvent) {
+						if err := writer.send(e); err != nil {
+							cancel()
+						}
+					})
 				}
 			case "connect":
 				reply.Result, reply.Error = manager.connect(ctx, r.Host)

@@ -1,9 +1,12 @@
 # Dependencies and generated executables
 node_modules/
 /bin/
+/dist/
+/installer/dist/
 *.test
 *.log
 *.zip
+*.dmg
 
 # OS/editor files
 .DS_Store

@@ -1,11 +1,11 @@
-import { validateHost } from './core.js';
+import { retryLabel, validateHost } from './core.js';
 const $ = (id) => document.getElementById(id);
 const popup = document.body.dataset.view === 'popup';
 const runtime = globalThis.chrome?.runtime;
 const preview = !runtime?.id;
 const incognito = !preview && Boolean(globalThis.chrome?.extension?.inIncognitoContext);
 const PREVIEW_KEY = 'ssh-browser-ui-preview-v1';
-let state = { hosts: [], status: 'disabled', activeHostId: null, error: null, helperVersion: null, proxyControlled: false };
+let state = { hosts: [], status: 'disabled', desiredMode: 'disabled', activeHostId: null, selectedHostId: null, error: null, helperVersion: null, helperAvailable: null, setupErrorCode: null, retryAttempt: 0, retryLimit: 0, proxyControlled: false };
 let selectedId = null;
 let filter = 'all';
 let search = '';
@@ -13,9 +13,13 @@ let editingId = null;
 let busy = false;
 let refreshPending = false;
 let operationError = '';
+let refreshError = '';
 let toastTimer;
 let pollTimer;
 let renderSignature = '';
+let stateRevision = 0;
+const POLL_INTERVAL = 15000;
+let listening = false;
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -23,7 +27,7 @@ const el = (tag, className, text) => {
   return node;
 };
 const button = (text, className, action, label) => {
-  const node = el('button', className, text);
+  const node = el('button', `btn btn-sm ${className || ''}${className?.includes('primary') ? ' btn-primary' : ''}${className?.includes('danger') ? ' btn-danger' : ''}`, text);
   node.type = 'button';
   if (label) node.setAttribute('aria-label', label);
   node.addEventListener('click', (event) => { event.stopPropagation(); action(event); });
@@ -38,7 +42,7 @@ function toast(message) {
 function errorMessage(error) {
   const message = typeof error === 'string' ? error : error?.message || '요청을 처리하지 못했습니다.';
   if (/native|helper|com\.sshbrowser|specified.*host|receiving end/i.test(message)) {
-    return `SSH 도우미에 연결하지 못했습니다. macOS 도우미 설치와 Chrome 확장 연결을 확인해 주세요. (${message})`;
+    return `SSH 도우미에 연결하지 못했습니다. SSH Browser Helper.app을 한 번 실행해 Chrome Native Messaging에 등록한 뒤 Chrome을 다시 시작하고 ‘도우미 설치 확인’을 눌러 주세요. (${message})`;
   }
   return message;
 }
@@ -52,8 +56,8 @@ function previewRequest(message) {
     const index = hosts.findIndex((host) => host.id === message.host.id);
     if (index < 0) hosts.push(message.host); else hosts[index] = message.host;
   } else if (message.type === 'DELETE_HOST') hosts = hosts.filter((host) => host.id !== message.id);
-  else if (['CONNECT', 'LOCAL', 'STOP'].includes(message.type)) {
-    throw new Error('UI 미리보기에서는 실제 SSH 연결이나 프록시 변경을 지원하지 않습니다. Chrome에 확장 프로그램과 macOS 도우미를 설치한 뒤 사용해 주세요.');
+  else if (['CONNECT', 'LOCAL', 'STOP', 'CHECK_HELPER'].includes(message.type)) {
+    throw new Error('UI 미리보기에서는 실제 SSH 연결이나 프록시 변경을 지원하지 않습니다. SSH Browser Helper.app을 한 번 실행해 등록하고, 별도 SSH-Browser-Extension.zip을 압축 해제해 Chrome에 확장 폴더를 로드한 뒤 사용해 주세요.');
   }
   if (message.type !== 'GET_STATE') {
     try { localStorage.setItem(PREVIEW_KEY, JSON.stringify(hosts)); }
@@ -72,24 +76,32 @@ async function request(message) {
     ]);
   } finally { clearTimeout(timeout); }
 }
-function accept(reply) {
-  if (reply?.state) state = { ...state, ...reply.state, hosts: Array.isArray(reply.state.hosts) ? reply.state.hosts : state.hosts };
+function applyState(next) {
+  if (!next || typeof next !== 'object') return;
+  state = { ...state, ...next, hosts: Array.isArray(next.hosts) ? next.hosts : state.hosts };
+  stateRevision++;
+}
+function accept(reply, revision = stateRevision) {
+  if (reply?.state && revision === stateRevision) applyState(reply.state);
   if (!reply?.ok) throw new Error(reply?.error || '확장 프로그램에서 유효한 응답을 받지 못했습니다.');
 }
 async function refresh() {
   if (incognito || busy || refreshPending) return;
   refreshPending = true;
-  try { accept(await request({ type: 'GET_STATE' })); }
-  catch (error) { operationError = errorMessage(error); }
+  const revision = stateRevision;
+  try { accept(await request({ type: 'GET_STATE' }), revision); refreshError = ''; }
+  catch (error) { if (revision === stateRevision) refreshError = errorMessage(error); }
   finally { refreshPending = false; render(); }
 }
 async function mutate(message, successMessage = '') {
   if (busy || incognito) return false;
   busy = true;
   operationError = '';
+  refreshError = '';
   render();
+  const revision = stateRevision;
   try {
-    accept(await request(message));
+    accept(await request(message), revision);
     if (successMessage) toast(successMessage);
     return true;
   } catch (error) {
@@ -102,14 +114,22 @@ function address(host) {
   return host.mode === 'alias' ? host.alias || 'SSH config 별칭' : `${host.user ? `${host.user}@` : ''}${host.address || ''}:${host.port || 22}`;
 }
 function connect(host) { selectedId = host.id; void mutate({ type: 'CONNECT', id: host.id }); }
+function hostInUse(id) {
+  return Boolean(id && (id === state.activeHostId || (state.desiredMode === 'remote' && (id === state.selectedHostId || id === state.pendingRemote?.hostId))));
+}
 function statusCopy() {
   const activeHost = state.hosts.find((host) => host.id === state.activeHostId);
   if (preview) return ['UI 미리보기', '실제 연결 없음', '호스트 설정만 이 브라우저에 저장됩니다. 네트워크 경로는 변경하지 않습니다.'];
   const descriptions = {
     local: ['로컬 직접 연결', 'DIRECT', 'SSH 프록시 없이 브라우저가 직접 연결하도록 설정했습니다.'],
     connecting: ['SSH 연결 중', '연결 준비', '인증과 터널 준비를 기다리고 있습니다. 연결 완료 전에는 경로를 사용할 수 없습니다.'],
-    connected: [activeHost?.name || 'SSH 호스트', 'SSH 연결됨', `${activeHost ? address(activeHost) + ' · ' : ''}선택한 SSH 터널을 브라우저 경로로 사용합니다.`],
-    error: ['연결을 확인해 주세요', '연결 오류', '직접 연결로 자동 전환하지 않습니다. 다시 연결하거나 로컬 직접 연결을 선택해 주세요.'],
+    reconnecting: ['SSH 재연결 중', '재연결', `터널을 다시 준비하고 있습니다 (${retryLabel(state)}). 직접 연결로 자동 전환하지 않습니다.`],
+    connected: [activeHost?.name || 'SSH 호스트', 'SSH 연결됨', `${activeHost ? address(activeHost) + ' · ' : ''}${Number.isFinite(state.connectionDurationMs) ? `연결 ${(state.connectionDurationMs / 1000).toFixed(1)}초 · ` : ''}선택한 SSH 터널을 브라우저 경로로 사용합니다.`],
+    error: state.desiredMode === 'remote'
+      ? ['SSH 연결 확인 필요', '연결 오류', 'SSH 경로를 사용할 수 없습니다. 직접 연결로 자동 전환하지 않습니다. 다시 연결하거나 로컬 직접 연결을 선택해 주세요.']
+      : state.desiredMode === 'local'
+        ? ['직접 연결 확인 필요', '설정 오류', '로컬 직접 연결 설정을 확인하지 못했습니다. 로컬 직접 연결을 다시 선택하거나 프록시 제어를 해제해 주세요.']
+        : ['프록시 설정 확인 필요', '설정 오류', '프록시 제어 해제를 확인하지 못했습니다. 다시 확인하거나 프록시 제어 해제를 선택해 주세요.'],
     disabled: ['기존 프록시 설정 사용', '제어 해제', '확장 기능의 제어가 해제되었습니다. 운영체제·정책·다른 확장의 기존 설정이 적용됩니다.'],
   };
   return descriptions[state.status] || ['상태 확인 중', '확인 중', '현재 브라우저 경로를 확인합니다.'];
@@ -119,13 +139,33 @@ function renderStatus() {
   $('status-title').textContent = title;
   $('status-pill').textContent = pill;
   $('status-pill').dataset.status = preview ? 'disabled' : state.status;
+  const stateStyle = !preview && state.status === 'connected' ? 'color-bg-success-emphasis color-fg-on-emphasis' : !preview && state.status === 'error' ? 'color-bg-danger-emphasis color-fg-on-emphasis' : ['connecting', 'reconnecting'].includes(state.status) ? 'color-bg-accent color-fg-accent' : 'color-bg-subtle color-fg-muted border color-border-default';
+  $('status-pill').className = `status-pill IssueLabel ${stateStyle}`;
   $('status-description').textContent = description;
-  const error = operationError || (state.error ? errorMessage(state.error) : '');
+  const error = operationError || refreshError || (state.error ? errorMessage(state.error) : '');
   $('error-panel').hidden = !error;
   $('error-text').textContent = error;
   $('local-button').disabled = busy || (!preview && state.status === 'connecting');
   $('stop-button').disabled = busy;
   if ($('helper-version')) $('helper-version').textContent = state.helperVersion ? `도우미 v${state.helperVersion}` : 'SSH Browser v0.1';
+  renderSetup();
+}
+function renderSetup() {
+  if (!$('setup-panel')) return;
+  const available = state.helperAvailable === true;
+  $('check-helper').disabled = busy || preview;
+  $('check-helper').textContent = available ? '도우미 다시 확인' : '도우미 설치 확인';
+  $('setup-status').textContent = preview ? '미리보기에서는 도우미를 확인하지 않습니다.' : available ? `도우미 사용 가능${state.helperVersion ? ` · v${state.helperVersion}` : ''}` : state.helperAvailable === false ? '도우미를 확인하지 못했습니다. SSH Browser Helper.app 최초 실행 등록과 Chrome 재시작을 확인해 주세요.' : '첫 사용: SSH Browser Helper.app을 한 번 실행해 등록한 뒤 ‘도우미 설치 확인’을 눌러 주세요.';
+  const code = state.setupErrorCode;
+  $('setup-error').hidden = !code;
+  const setupErrors = {
+    PROTOCOL: '도우미와 확장의 버전이 맞지 않습니다. 같은 배포본의 SSH Browser Helper.app을 한 번 실행해 등록하고 별도 SSH-Browser-Extension.zip의 확장을 다시 로드한 뒤, Chrome을 다시 시작해 ‘도우미 설치 확인’을 눌러 주세요.',
+    NATIVE_UNAVAILABLE: '도우미에 접근하지 못했습니다. SSH Browser Helper.app을 한 번 실행해 Chrome Native Messaging에 등록한 뒤 Chrome을 다시 시작하고 ‘도우미 설치 확인’을 눌러 주세요.',
+    NATIVE_TIMEOUT: '도우미가 제한 시간 안에 응답하지 않았습니다. SSH Browser Helper.app 최초 실행 등록을 확인한 뒤 Chrome을 다시 시작하고 ‘도우미 설치 확인’을 눌러 주세요.',
+  };
+  const setupError = Object.hasOwn(setupErrors, code) ? setupErrors[code] : '도우미 설치 확인에 실패했습니다. SSH Browser Helper.app 최초 실행 등록을 확인한 뒤 Chrome을 다시 시작하고 ‘도우미 설치 확인’을 눌러 주세요.';
+  $('setup-error').textContent = code ? `${setupError} (${code})` : '';
+  if ($('setup-instructions')) $('setup-instructions').hidden = available;
 }
 function renderGroups() {
   const groups = [...new Set(state.hosts.map((host) => host.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
@@ -136,8 +176,8 @@ function renderGroups() {
   const fragment = document.createDocumentFragment();
   const suggestions = document.createDocumentFragment();
   for (const group of groups) {
-    const node = button('', `nav-item${filter === `group:${group}` ? ' active' : ''}`, () => setFilter(`group:${group}`));
-    node.append(el('span', 'group-dot'), el('span', '', group), el('span', 'count', state.hosts.filter((host) => host.group === group).length));
+    const node = button('', `nav-item${filter === `group:${group}` ? ' active selected' : ''}`, () => setFilter(`group:${group}`));
+    node.append(el('span', 'group-dot'), el('span', '', group), el('span', 'Counter count', state.hosts.filter((host) => host.group === group).length));
     node.setAttribute('aria-pressed', String(filter === `group:${group}`));
     fragment.append(node);
     const option = el('option'); option.value = group; suggestions.append(option);
@@ -146,10 +186,11 @@ function renderGroups() {
   $('group-suggestions').replaceChildren(suggestions);
   document.querySelectorAll('[data-filter]').forEach((node) => {
     node.classList.toggle('active', node.dataset.filter === filter);
+    node.classList.toggle('selected', node.dataset.filter === filter);
     node.setAttribute('aria-pressed', String(node.dataset.filter === filter));
   });
   const title = filter === 'all' ? '모든 호스트' : filter === 'favorites' ? '즐겨찾기' : filter.slice(6);
-  $('page-title').replaceChildren(document.createTextNode(title), el('span', 'title-dot', '.'));
+  $('page-title').textContent = title;
 }
 function visibleHosts() {
   return state.hosts.filter((host) => (filter === 'all' || (filter === 'favorites' ? host.favorite : host.group === filter.slice(6))) &&
@@ -165,15 +206,18 @@ function hostCard(host) {
   card.addEventListener('click', select);
   card.addEventListener('keydown', (event) => { if (event.target === card && ['Enter', ' '].includes(event.key)) { event.preventDefault(); select(); } });
   const top = el('div', 'card-top');
-  const favorite = button(host.favorite ? '★' : '☆', `icon-button favorite-button${host.favorite ? ' on' : ''}`, () => void mutate({ type: 'SAVE_HOST', host: { ...host, favorite: !host.favorite } }), `${host.name} 즐겨찾기 ${host.favorite ? '해제' : '추가'}`);
+  const favorite = button(host.favorite ? '★' : '☆', `icon-button favorite-button${host.favorite ? ' on selected' : ''}`, () => void mutate({ type: 'SAVE_HOST', host: { ...host, favorite: !host.favorite } }), `${host.name} 즐겨찾기 ${host.favorite ? '해제' : '추가'}`);
   favorite.disabled = busy;
   favorite.setAttribute('aria-pressed', String(Boolean(host.favorite)));
-  top.append(el('span', 'host-icon', '>_'), favorite);
+  top.append(favorite);
   const bottom = el('div', 'card-bottom');
-  const connectButton = button(active ? '사용 중 ✓' : '연결하기 ↗', active ? 'card-connect card-active' : 'card-connect', () => connect(host));
-  connectButton.disabled = busy || active;
+  const pending = hostInUse(host.id) && ['connecting', 'reconnecting'].includes(state.status);
+  const connectButton = button(active ? '사용 중' : pending ? '연결 중' : '연결', 'card-connect', () => connect(host));
+  connectButton.disabled = busy || active || pending;
   bottom.append(el('span', 'group-tag', host.group || '그룹 없음'), connectButton);
-  card.append(top, el('h2', '', host.name), el('div', 'host-address', address(host)), bottom);
+  const copy = el('div', 'host-copy');
+  copy.append(el('h2', '', host.name), el('div', 'host-address', address(host)));
+  card.append(top, copy, bottom);
   return card;
 }
 function renderDetails() {
@@ -181,7 +225,7 @@ function renderDetails() {
   const host = state.hosts.find((candidate) => candidate.id === selectedId);
   if (!host) {
     const empty = el('div', 'detail-placeholder');
-    empty.append(el('span', 'host-icon', '>_'), el('h2', '', '연결을 위한 작은 공간'), el('p', '', '호스트를 선택하면 접속 정보와\n연결 옵션을 여기서 확인할 수 있어요.'));
+    empty.append(el('h2', '', '호스트 상세'), el('p', '', '호스트를 선택하면 접속 정보와 연결 옵션을 확인할 수 있어요.'));
     container.replaceChildren(empty); return;
   }
   const list = el('dl', 'detail-list');
@@ -189,35 +233,38 @@ function renderDetails() {
   if (host.mode === 'manual') values.push(['포트', host.port || 22], ['사용자', host.user || 'SSH 기본 설정'], ['개인 키 경로', host.keyPath || 'SSH 기본 인증 설정']);
   for (const [label, value] of values) { const row = el('div'); row.append(el('dt', '', label), el('dd', label === '그룹' ? '' : 'mono', value)); list.append(row); }
   const active = state.status === 'connected' && state.activeHostId === host.id;
-  const connectButton = button(active ? '현재 사용 중' : '이 호스트로 연결 ↗', 'button primary full-width', () => connect(host));
-  connectButton.disabled = busy || active;
+  const pending = hostInUse(host.id) && ['connecting', 'reconnecting'].includes(state.status);
+  const connectButton = button(active ? '현재 사용 중' : pending ? '연결 중' : '이 호스트로 연결', 'button primary full-width', () => connect(host));
+  connectButton.disabled = busy || active || pending;
   const actions = el('div', 'detail-actions');
   const edit = button('호스트 편집', 'text-button', () => openDialog(host));
   const remove = button('삭제', 'text-button danger', () => deleteHost(host));
-  edit.disabled = busy; remove.disabled = busy;
+  edit.disabled = busy; remove.disabled = busy || hostInUse(host.id);
+  if (hostInUse(host.id)) remove.title = '로컬 직접 연결 또는 프록시 제어 해제 후 삭제할 수 있어요.';
   actions.append(edit, remove);
-  container.replaceChildren(el('div', 'host-icon detail-avatar', '>_'), el('h2', 'detail-name', host.name), el('span', 'detail-mode', host.mode === 'alias' ? 'SSH CONFIG ALIAS' : 'MANUAL CONNECTION'), list, connectButton, actions);
+  container.replaceChildren(el('h2', 'detail-name', host.name), el('span', 'detail-mode', host.mode === 'alias' ? 'SSH config 별칭' : '직접 입력'), list, connectButton, actions);
 }
 function renderPopup(hosts) {
   const fragment = document.createDocumentFragment();
   for (const host of hosts) {
     const active = state.status === 'connected' && state.activeHostId === host.id;
-    const node = button('', `popup-host${active ? ' active' : ''}`, () => connect(host), `${host.name}${active ? ' 사용 중' : ' 연결'}`);
-    node.disabled = busy || active;
+    const node = button('', `popup-host${active ? ' active selected' : ''}`, () => connect(host), `${host.name}${active ? ' 사용 중' : ' 연결'}`);
+    node.disabled = busy || active || (hostInUse(host.id) && ['connecting', 'reconnecting'].includes(state.status));
     const copy = el('span', 'popup-host-copy'); copy.append(el('strong', '', `${host.favorite ? '☆ ' : ''}${host.name}`), el('small', '', address(host)));
-    node.append(el('span', 'host-icon', '>_'), copy, el('span', 'switch-arrow', active ? '✓' : '↗'));
+    node.append(copy, el('span', 'switch-arrow', active ? '사용 중' : '연결'));
     fragment.append(node);
   }
   $('popup-host-list').replaceChildren(fragment);
   $('empty-state').hidden = hosts.length > 0;
   if (!hosts.length) {
-    $('empty-state').replaceChildren(document.createTextNode(state.hosts.length ? '검색 결과가 없습니다.' : '아직 저장된 호스트가 없습니다.'), el('br'), button('호스트 관리 열기 ↗', 'text-button', openSettings));
+    $('empty-state').replaceChildren(document.createTextNode(state.hosts.length ? '검색 결과가 없습니다.' : '아직 저장된 호스트가 없습니다.'), el('br'), button('호스트 관리 열기', 'text-button', openSettings));
   }
 }
 function render() {
   if (incognito) return;
   renderStatus();
-  const signature = JSON.stringify([state.hosts, state.status, state.activeHostId, selectedId, filter, search, busy]);
+  if (!popup && $('host-dialog').open) updateMode();
+  const signature = JSON.stringify([state.hosts, state.status, state.activeHostId, state.selectedHostId, state.desiredMode, selectedId, filter, search, busy]);
   if (renderSignature === signature) return;
   renderSignature = signature;
   if (selectedId && !state.hosts.some((host) => host.id === selectedId)) selectedId = null;
@@ -228,9 +275,9 @@ function render() {
   $('host-grid').replaceChildren(...hosts.map(hostCard));
   $('empty-state').hidden = hosts.length > 0;
   const first = state.hosts.length === 0;
-  $('empty-title').textContent = first ? '첫 번째 경로를 추가하세요' : '해당하는 호스트가 없습니다';
-  $('empty-description').textContent = first ? 'SSH config의 별칭이나 서버 주소로 나만의 호스트 목록을 만들어 보세요.' : '다른 검색어를 입력하거나 새로운 호스트를 추가해 보세요.';
-  $('empty-add').textContent = first ? '＋ 첫 호스트 추가' : '＋ 호스트 추가';
+  $('empty-title').textContent = first ? '등록된 호스트가 없습니다' : '해당하는 호스트가 없습니다';
+  $('empty-description').textContent = first ? 'SSH config 별칭이나 서버 주소로 첫 호스트를 추가해 주세요.' : '다른 검색어를 입력하거나 새로운 호스트를 추가해 보세요.';
+  $('empty-add').textContent = first ? '첫 호스트 추가' : '호스트 추가';
   $('add-host').disabled = busy;
   $('empty-add').disabled = busy;
   $('save-host').disabled = busy;
@@ -239,12 +286,15 @@ function render() {
 function setFilter(value) { filter = value; render(); }
 function updateMode() {
   const manual = document.querySelector('input[name=mode]:checked').value === 'manual';
+  const locked = hostInUse(editingId);
   $('manual-fields').hidden = !manual;
   $('alias-fields').hidden = manual;
   $('host-alias').required = !manual;
   $('host-address').required = manual;
-  for (const name of ['address', 'port', 'user', 'keyPath']) $(`host-${name}`).disabled = !manual;
-  $('host-alias').disabled = manual;
+  for (const name of ['address', 'port', 'user', 'keyPath']) $(`host-${name}`).disabled = locked || !manual;
+  $('host-alias').disabled = locked || manual;
+  document.querySelectorAll('input[name=mode]').forEach(node => { node.disabled = locked; });
+  if ($('connection-lock-note')) $('connection-lock-note').hidden = !locked;
 }
 function openDialog(host = null) {
   editingId = host?.id || null;
@@ -263,11 +313,13 @@ async function saveHost(event) {
   event.preventDefault();
   const mode = document.querySelector('input[name=mode]:checked').value;
   const value = (name) => $(`host-${name}`).value.trim();
-  const host = { id: editingId || crypto.randomUUID(), name: value('name'), group: value('group'), favorite: $('host-favorite').checked, mode, alias: mode === 'alias' ? value('alias') : '', address: mode === 'manual' ? value('address') : '', port: mode === 'manual' ? Number(value('port') || 22) : 22, user: mode === 'manual' ? value('user') : '', keyPath: mode === 'manual' ? value('keyPath') : '' };
+  const metadata = { name: value('name'), group: value('group'), favorite: $('host-favorite').checked };
+  const original = state.hosts.find(host => host.id === editingId);
+  const host = hostInUse(editingId) && original ? { ...original, ...metadata } : { id: editingId || crypto.randomUUID(), ...metadata, mode, alias: mode === 'alias' ? value('alias') : '', address: mode === 'manual' ? value('address') : '', port: mode === 'manual' ? Number(value('port') || 22) : 22, user: mode === 'manual' ? value('user') : '', keyPath: mode === 'manual' ? value('keyPath') : '' };
   let validation = '';
   if (!host.name) validation = '호스트 이름을 입력해 주세요.';
-  else if (mode === 'alias' && (!host.alias || /^[\s-]|\s/.test(host.alias))) validation = 'SSH 별칭에는 공백을 사용할 수 없으며 하이픈으로 시작할 수 없습니다.';
-  else if (mode === 'manual' && (!host.address || /\s|:\/\//.test(host.address) || host.address.startsWith('-'))) validation = '서버 주소만 입력해 주세요. 프로토콜과 공백은 포함하지 않습니다.';
+  else if (host.mode === 'alias' && (!host.alias || /^[\s-]|\s/.test(host.alias))) validation = 'SSH 별칭에는 공백을 사용할 수 없으며 하이픈으로 시작할 수 없습니다.';
+  else if (host.mode === 'manual' && (!host.address || /\s|:\/\//.test(host.address) || host.address.startsWith('-'))) validation = '서버 주소만 입력해 주세요. 프로토콜과 공백은 포함하지 않습니다.';
   else if (host.user && (/\s/.test(host.user) || host.user.startsWith('-'))) validation = '사용자 이름에 공백이나 시작 하이픈을 사용할 수 없습니다.';
   else if (!Number.isInteger(host.port) || host.port < 1 || host.port > 65535) validation = '포트는 1부터 65535 사이여야 합니다.';
   else if (host.keyPath && !host.keyPath.startsWith('/')) validation = '개인 키 경로는 /로 시작하는 절대 경로여야 합니다.';
@@ -295,6 +347,7 @@ function confirmDelete(host) {
   });
 }
 async function deleteHost(host) {
+  if (hostInUse(host.id)) { toast('사용 중인 호스트는 로컬 직접 연결 또는 프록시 제어 해제 후 삭제해 주세요.'); return; }
   if (!await confirmDelete(host)) return;
   await mutate({ type: 'DELETE_HOST', id: host.id }, '호스트를 삭제했습니다.');
 }
@@ -303,6 +356,23 @@ function openSettings(event) {
   if (preview) location.href = 'options.html';
   else Promise.resolve(runtime.openOptionsPage()).catch((error) => toast(errorMessage(error)));
 }
+function onStateChanged(message, sender) {
+  if (message?.type !== 'STATE_CHANGED' || sender?.id !== runtime?.id || !message.state) return;
+  applyState(message.state);
+  // A newer state supersedes a failed read, but a failed user action stays visible until the next action.
+  refreshError = '';
+  render();
+}
+function startUpdates() {
+  if (preview) return;
+  if (!listening && runtime.onMessage?.addListener) { runtime.onMessage.addListener(onStateChanged); listening = true; }
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => { if (!document.hidden) void refresh(); }, POLL_INTERVAL);
+}
+function stopUpdates() {
+  clearInterval(pollTimer);
+  if (listening) { runtime.onMessage?.removeListener?.(onStateChanged); listening = false; }
+}
 $('preview-banner').hidden = !preview;
 $('incognito-warning').hidden = !incognito;
 $('app').hidden = incognito;
@@ -310,7 +380,8 @@ if (!incognito) {
   $('search').addEventListener('input', (event) => { search = event.target.value.trim(); render(); });
   $('local-button').addEventListener('click', () => void mutate({ type: 'LOCAL' }));
   $('stop-button').addEventListener('click', () => void mutate({ type: 'STOP' }));
-  $('retry-state').addEventListener('click', () => { operationError = ''; void refresh(); });
+  $('retry-state').addEventListener('click', () => { operationError = ''; refreshError = ''; void refresh(); });
+  $('check-helper')?.addEventListener('click', () => void mutate({ type: 'CHECK_HELPER' }, '도우미 설치를 확인했습니다.'));
   if (popup) {
     $('open-settings').addEventListener('click', openSettings);
     $('popup-brand').addEventListener('click', openSettings);
@@ -327,10 +398,10 @@ if (!incognito) {
       if (event.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && !$('host-dialog').open) { event.preventDefault(); $('search').focus(); }
     });
   }
+  startUpdates();
   void refresh();
-  pollTimer = setInterval(() => { if (!document.hidden) void refresh(); }, 1750);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
   window.addEventListener('storage', (event) => { if (preview && event.key === PREVIEW_KEY) void refresh(); });
-  window.addEventListener('pagehide', () => { clearInterval(pollTimer); clearTimeout(toastTimer); });
-  window.addEventListener('pageshow', (event) => { if (event.persisted) { clearInterval(pollTimer); pollTimer = setInterval(() => { if (!document.hidden) void refresh(); }, 1750); void refresh(); } });
+  window.addEventListener('pagehide', () => { stopUpdates(); clearTimeout(toastTimer); });
+  window.addEventListener('pageshow', (event) => { if (event.persisted) { startUpdates(); void refresh(); } });
 }

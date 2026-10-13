@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "proxy",
-    "nativeMessaging"
+    "nativeMessaging",
+    "alarms"
   ],
   "incognito": "not_allowed",
   "background": {

@@ -27,7 +27,9 @@ function fixture(saved={},controllerOptions={}) {
     crash(){live.clear();this.closed=true;this.onLost(Error('crash'));}
     exit(id){live.delete('t-'+id);this.onEvent({event:'tunnel-exit',tunnelId:`t-${id}`,reason:'SSH exited'});}
   }
-  const controller=createController(chrome,{NativeClient:NativeMock,uuid:()=> 'profile-test',...controllerOptions});
+  // Existing lifecycle tests must never leave real reconnect timers running.
+  const timers={setTimeout(){return 1;},clearTimeout(){}};
+  const controller=createController(chrome,{NativeClient:NativeMock,uuid:()=> 'profile-test',timers,now:()=>1700000000000,...controllerOptions});
   return {controller,storage,calls,chrome,live,get value(){return value;},get native(){return instance;},fail(){failure=true;},wait(promise){waiting=promise;},override(){level='controlled_by_other_extensions';value={mode:'direct'};for(const fn of changes)fn({value,levelOfControl:level});}};
 }
 test('SOCKS routes localhost too; regular scope and exactly one verification',async()=>{
@@ -45,11 +47,12 @@ test('failed switch preserves old live tunnel and proxy',async()=>{
   assert.equal(reply.ok,false);assert.equal(reply.state.status,'connected');assert.equal(reply.state.activeHostId,'a');assert.equal(f.value.rules.singleProxy.port,40101);
   assert.equal(f.calls.some(c=>c[0]==='release'),false);
 });
-test('unexpected native crash never clears SOCKS and reports error',async()=>{
+test('unexpected native crash installs blocker and reports reconnecting',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});f.calls.length=0;f.native.crash();
   const reply=await f.controller.handle({type:'GET_STATE'});
-  assert.equal(reply.state.status,'error');assert.equal(reply.state.desiredMode,'remote');assert.deepEqual(f.value,socksConfig(40101));
-  assert.equal(f.calls.some(c=>c[0]==='clear'||c[0]==='set'),false);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.controller.getState().status,'reconnecting');assert.equal(reply.state.desiredMode,'remote');assert.deepEqual(f.value,socksConfig(9));
+  assert.equal(f.calls.some(c=>c[0]==='clear'),false);
 });
 test('switch persists new route before releasing prior tunnel',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});f.calls.length=0;
@@ -71,7 +74,7 @@ test('concurrent CONNECT and LOCAL execute serially',async()=>{
 });
 test('remote restart stays blocked without helper; never trusts saved connected',async()=>{
   const f=fixture({desiredMode:'remote',selectedHostId:'a',currentPort:40101,controllerState:{status:'connected'}});await f.controller.ready;
-  const state=(await f.controller.handle({type:'GET_STATE'})).state;assert.equal(state.status,'error');assert.equal(state.activeHostId,null);assert.equal(f.value.mode,'fixed_servers');assert.equal(f.calls.some(c=>c[0]==='native'),false);
+  const state=(await f.controller.handle({type:'GET_STATE'})).state;assert.equal(state.status,'reconnecting');assert.equal(state.activeHostId,null);assert.deepEqual(f.value,socksConfig(9));assert.equal(f.calls.some(c=>c[0]==='native'),false);
 });
 test('GET_STATE does not start helper for local or disabled',async()=>{
   for(const desiredMode of ['local','disabled']){const f=fixture({desiredMode});await f.controller.handle({type:'GET_STATE'});assert.equal(f.calls.some(c=>c[0]==='native'),false);}
@@ -105,9 +108,10 @@ test('corrupt saved host cannot prevent startup blocking; stale port never reuse
   const f=fixture({desiredMode:'remote',currentPort:40101,hosts:[{bad:true}]});await f.controller.ready;
   assert.equal(f.value.rules.singleProxy.port,9);assert.equal(f.storage.currentPort,9);assert.equal(f.controller.getState().status,'error');
 });
-test('tunnel exit keeps dead proxy and does not imply direct mode',async()=>{
+test('tunnel exit installs blocker and does not imply direct mode',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});f.native.exit('a');
-  assert.equal(f.controller.getState().status,'error');assert.equal(f.value.rules.singleProxy.port,40101);assert.equal(f.controller.getState().desiredMode,'remote');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.controller.getState().status,'reconnecting');assert.equal(f.value.rules.singleProxy.port,9);assert.equal(f.controller.getState().desiredMode,'remote');
 });
 test('same-host connected selection is a no-op, not another SSH process',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});f.calls.length=0;
@@ -116,7 +120,7 @@ test('same-host connected selection is a no-op, not another SSH process',async()
 test('old tunnel exiting during failed switch cannot be reported connected',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});let resume;f.wait(new Promise(resolve=>resume=resolve));f.fail();
   const switching=f.controller.handle({type:'CONNECT',id:'b'});await new Promise(resolve=>setImmediate(resolve));f.native.exit('a');resume();
-  const reply=await switching;assert.equal(reply.ok,false);assert.equal(reply.state.status,'error');assert.equal(reply.state.activeHostId,null);assert.equal(f.value.rules.singleProxy.port,40101);
+  const reply=await switching;assert.equal(reply.ok,false);assert.equal(reply.state.status,'error');assert.equal(reply.state.activeHostId,null);assert.equal(f.value.rules.singleProxy.port,9);
 });
 
 test('write-ahead marker is durable before first SOCKS side effect and removed on commit',async()=>{
@@ -193,7 +197,7 @@ test('candidate exit during commit returns failure, not a stale connected reply'
   };
   const reply=await f.controller.handle({type:'CONNECT',id:'b'});
   assert.equal(reply.ok,false);assert.equal(reply.state.status,'error');assert.equal(reply.state.activeHostId,null);
-  assert.deepEqual(f.value,socksConfig(40102));assert.equal(f.live.has('t-b'),false);assert.equal(f.storage.desiredMode,'remote');
+  assert.deepEqual(f.value,socksConfig(9));assert.equal(f.live.has('t-b'),false);assert.equal(f.storage.desiredMode,'remote');
 });
 test('candidate exit during old release never restores the now-dead old tunnel',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});f.calls.length=0;
@@ -201,7 +205,7 @@ test('candidate exit during old release never restores the now-dead old tunnel',
   f.native.request=async(type,data)=>{const result=await request(type,data);if(type==='release'&&data.tunnelId==='t-a')f.native.exit('b');return result;};
   const reply=await f.controller.handle({type:'CONNECT',id:'b'});
   assert.equal(reply.ok,false);assert.equal(reply.state.status,'error');assert.equal(reply.state.activeHostId,null);assert.equal(f.live.size,0);
-  assert.deepEqual(f.value,socksConfig(40102));assert.equal(f.calls.some(c=>c[0]==='set'&&c[1].value.rules?.singleProxy.port===40101),false);
+  assert.deepEqual(f.value,socksConfig(9));assert.equal(f.calls.some(c=>c[0]==='set'&&c[1].value.rules?.singleProxy.port===40101),false);
 });
 test('old tunnel exit during new commit does not invalidate the live candidate',async()=>{
   const f=fixture();await f.controller.handle({type:'CONNECT',id:'a'});
