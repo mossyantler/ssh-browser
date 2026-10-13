@@ -61,7 +61,7 @@ rtk proxy env SSH_BROWSER_REMOTE_TESTS=1 SSH_BROWSER_TEST_HOST=oracle \
   node tests/browser-remote.cjs
 ```
 
-같은 원격 명령에 `SSH_BROWSER_BENCH=1`을 더하면 연결 후 NAVER를 순차 3회, 병렬 탭 6개로 열어 TTFB·load 시간·리소스 대기(p50/p95)를 숫자로만 report의 `benchmark`에 남겨요. `connectionDurationMs`도 함께 기록돼요. 라우팅 변경 전후 같은 네트워크에서 비교해 주세요.
+같은 원격 명령에 `SSH_BROWSER_BENCH=1`을 더하면 연결 후 캐시를 끈 상태로 NAVER를 순차 3회, 병렬 탭 6개로 열어 페이지 TTFB·load 시간과, CDP Network 이벤트로 잰 모든 요청의 대기(소켓 대기 포함)·연결·TTFB·다운로드 시간(p50/p95), 요청 수, 새 연결 수, HTTP/1.1 요청 수, 전송 바이트를 숫자로만 report의 `benchmark`에 남겨요. 병렬에서 대기만 크게 늘면 프록시 소켓 한도, 처리량이 회선 한계에 붙어 있으면 대역폭 병목으로 판단해요. `connectionDurationMs`도 함께 기록돼요. 라우팅 변경 전후 같은 네트워크에서 비교해 주세요.
 
 hello 성공만으로 원격 경로가 검증되지는 않아요. 소스 바이너리·임시 브라우저 검사도 사용자 앱의 최초 실행 등록을 대신하지 않아요. 이번 배포 패키지의 실제 실행 결과는 통합 담당자가 제공한 증거를 기준으로 반영해요.
 

@@ -44,25 +44,71 @@ function pageTimings() {
   };
 }
 
+// Network events expose per-request phases for every origin, unlike Resource
+// Timing, which hides cross-origin detail without Timing-Allow-Origin.
+// waitMs is queueing plus stalled time before the request reaches a socket:
+// Chrome's per-proxy socket limit shows up there. Only numbers are kept.
+function recordNetwork(cdp) {
+  const issued = new Map(), requests = new Map();
+  cdp.on('Network.requestWillBeSent', event => { if (/^https?:/.test(event.request.url)) issued.set(event.requestId, event.timestamp); });
+  cdp.on('Network.responseReceived', event => {
+    const timing = event.response.timing, issuedAt = issued.get(event.requestId);
+    if (!timing || issuedAt === undefined) return;
+    const firstStart = [timing.proxyStart, timing.dnsStart, timing.connectStart, timing.sendStart].find(value => value >= 0) ?? 0;
+    requests.set(event.requestId, {
+      waitMs: (timing.requestTime - issuedAt) * 1000 + firstStart,
+      connectMs: timing.connectStart >= 0 ? timing.connectEnd - timing.connectStart : 0,
+      ttfbMs: timing.receiveHeadersEnd - timing.sendEnd,
+      headersAt: timing.requestTime + timing.receiveHeadersEnd / 1000,
+      reused: event.response.connectionReused === true,
+      http1: /^http\/1/i.test(event.response.protocol || ''),
+    });
+  });
+  cdp.on('Network.loadingFinished', event => {
+    const entry = requests.get(event.requestId);
+    if (entry) { entry.downloadMs = Math.max(0, (event.timestamp - entry.headersAt) * 1000); entry.bytes = event.encodedDataLength; }
+  });
+  return () => [...requests.values()].filter(entry => entry.downloadMs !== undefined);
+}
+function summarize(entries) {
+  const percentile = (values, p) => values.length ? Math.round(values.slice().sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))]) : null;
+  const phase = key => ({ p50: percentile(entries.map(entry => entry[key]), 0.5), p95: percentile(entries.map(entry => entry[key]), 0.95) });
+  return {
+    requests: entries.length, newConnections: entries.filter(entry => !entry.reused).length,
+    http1: entries.filter(entry => entry.http1).length, bytes: entries.reduce((sum, entry) => sum + (entry.bytes || 0), 0),
+    waitMs: phase('waitMs'), connectMs: phase('connectMs'), ttfbMs: phase('ttfbMs'), downloadMs: phase('downloadMs'),
+  };
+}
+
 // Opt-in browsing benchmark: sequential loads, then parallel tabs to expose
-// per-proxy socket queueing. Compare runs before and after routing changes.
+// per-proxy socket queueing. The HTTP cache is disabled so every load fetches
+// the same work. Compare runs before and after routing changes.
 async function browsingBenchmark(context, bounded) {
-  const load = async () => {
+  const all = { sequential: [], parallel: [] };
+  const load = async mode => {
     const page = await bounded(() => context.newPage(), UI_MS, 'create benchmark page');
     try {
+      const cdp = await bounded(() => context.newCDPSession(page), UI_MS, 'benchmark CDP session');
+      const collect = recordNetwork(cdp);
+      await bounded(() => cdp.send('Network.enable'), UI_MS, 'enable network events');
+      await bounded(() => cdp.send('Network.setCacheDisabled', { cacheDisabled: true }), UI_MS, 'disable cache');
       const started = Date.now();
       await bounded(() => page.goto(BENCH_URL, { waitUntil: 'load', timeout: NAVIGATION_MS }), NAVIGATION_MS + 1000, 'benchmark navigation');
       const wallMs = Date.now() - started;
-      return { wallMs, ...await bounded(() => page.evaluate(pageTimings), UI_MS, 'benchmark timings') };
+      const timings = await bounded(() => page.evaluate(pageTimings), UI_MS, 'benchmark timings');
+      const entries = collect();
+      all[mode].push(...entries);
+      return { wallMs, ttfbMs: timings.ttfbMs, loadMs: timings.loadMs, network: summarize(entries) };
     } finally {
       await bounded(() => page.close({ runBeforeUnload: false }), CLOSE_MS, 'close benchmark page').catch(() => {});
     }
   };
   const sequential = [];
-  for (let round = 0; round < BENCH_ROUNDS; round++) sequential.push(await load());
+  for (let round = 0; round < BENCH_ROUNDS; round++) sequential.push(await load('sequential'));
   const started = Date.now();
-  const parallel = await Promise.all(Array.from({ length: BENCH_PARALLEL }, load));
-  return { rounds: BENCH_ROUNDS, sequential, parallelTabs: BENCH_PARALLEL, parallelWallMs: Date.now() - started, parallel };
+  const parallel = await Promise.all(Array.from({ length: BENCH_PARALLEL }, () => load('parallel')));
+  return { rounds: BENCH_ROUNDS, sequential, parallelTabs: BENCH_PARALLEL, parallelWallMs: Date.now() - started, parallel,
+    sequentialNetwork: summarize(all.sequential), parallelNetwork: summarize(all.parallel) };
 }
 function helperProvenance(helper) {
   const result = {};
